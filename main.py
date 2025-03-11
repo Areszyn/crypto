@@ -3,90 +3,94 @@ import re
 import matplotlib.pyplot as plt
 from io import BytesIO
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # Telegram API Details
 API_ID = 21017005
 API_HASH = "031173130fa724e7ecded16064724d96"
-BOT_TOKEN = "7882550530:AAHGbNRtsM5uGYDYwuxbrLyfWeOYpIRolGk"
+BOT_TOKEN = "6762861077:AAHw71yggj7d619H-rdMSt-TyGWJcI_jlA4"
 
 app = Client("crypto_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 
-# Function to fetch a list of all cryptocurrencies from CoinGecko
+# Fetch all crypto symbols dynamically
 def get_all_crypto_symbols():
-    response = requests.get(f"{COINGECKO_API}/coins/list").json()
-    crypto_symbols = {coin["id"].lower(): coin["id"] for coin in response}
-    crypto_symbols.update({coin["symbol"].lower(): coin["id"] for coin in response})
-    return crypto_symbols
+    try:
+        response = requests.get(f"{COINGECKO_API}/coins/list").json()
+        return {coin["symbol"].lower(): (coin["id"], coin["symbol"].upper()) for coin in response}
+    except Exception:
+        return {}
 
-# Load crypto symbols (ID and symbol mapping)
 CRYPTO_SYMBOLS = get_all_crypto_symbols()
 
-# Function to detect crypto symbols in text
+# Extract crypto symbol from message (must start with `$`)
 def detect_crypto_symbol(text):
-    words = re.findall(r'\b[a-zA-Z0-9$]+\b', text.lower())  # Extract words
-    for word in words:
-        if word.startswith("$"):
-            word = word[1:]  # Remove "$" if present
-        if word in CRYPTO_SYMBOLS:
-            return CRYPTO_SYMBOLS[word]  # Return the actual CoinGecko ID
+    matches = re.findall(r'\$([a-zA-Z0-9]+)', text)
+    for match in matches:
+        if match.lower() in CRYPTO_SYMBOLS:
+            return CRYPTO_SYMBOLS[match.lower()]
     return None
 
-# Function to get crypto data
-def get_crypto_data(symbol, currency="usd"):
-    response = requests.get(f"{COINGECKO_API}/coins/markets", params={
-        "vs_currency": currency,
-        "ids": symbol.lower(),
-        "order": "market_cap_desc",
-        "per_page": 1,
-        "page": 1,
-        "sparkline": "false"
-    }).json()
+# Fetch crypto price & supply data
+def get_crypto_data(crypto_id):
+    try:
+        response = requests.get(f"{COINGECKO_API}/coins/markets", params={
+            "vs_currency": "usd",
+            "ids": crypto_id,
+            "order": "market_cap_desc",
+            "per_page": 1,
+            "page": 1,
+            "sparkline": "false"
+        }).json()
 
-    if response and isinstance(response, list):
-        return response[0]
-    return None
-
-# Function to generate a 24-hour price chart
-def generate_graph(symbol):
-    url = f"{COINGECKO_API}/coins/{symbol}/market_chart"
-    response = requests.get(url, params={"vs_currency": "usd", "days": "1"}).json()
-    
-    if "prices" not in response:
+        return response[0] if response and isinstance(response, list) else None
+    except Exception:
         return None
-    
-    prices = response["prices"]
-    timestamps = [p[0] for p in prices]
-    values = [p[1] for p in prices]
 
-    plt.figure(figsize=(8, 4))
-    plt.plot(timestamps, values, label=f"{symbol.upper()} Price", color="blue")
-    plt.xlabel("Time")
-    plt.ylabel("Price (USD)")
-    plt.title(f"{symbol.upper()} 24-Hour Price Chart")
-    plt.legend()
-    plt.grid()
+# Generate a 24-hour price graph
+def generate_graph(symbol):
+    try:
+        url = f"{COINGECKO_API}/coins/{symbol}/market_chart"
+        response = requests.get(url, params={"vs_currency": "usd", "days": "1"}).json()
+        
+        if "prices" not in response:
+            return None
+        
+        prices = response["prices"]
+        timestamps = [p[0] for p in prices]
+        values = [p[1] for p in prices]
 
-    img = BytesIO()
-    plt.savefig(img, format="png")
-    img.seek(0)
-    plt.close()
-    return img
+        plt.figure(figsize=(8, 4))
+        plt.plot(timestamps, values, label=f"{symbol.upper()} Price", color="blue")
+        plt.xlabel("Time")
+        plt.ylabel("Price (USD)")
+        plt.title(f"{symbol.upper()} 24H Price Chart")
+        plt.legend()
+        plt.grid()
 
-# Handle crypto requests
+        img = BytesIO()
+        plt.savefig(img, format="png")
+        img.seek(0)
+        plt.close()
+        return img
+    except Exception:
+        return None
+
+# Handle messages with `$SYMBOL`
 @app.on_message(filters.text & ~filters.command(["start"]))
 def crypto_handler(client, message):
-    text = message.text.strip().lower()
-    symbol = detect_crypto_symbol(text)
+    text = message.text.strip()
+    detected = detect_crypto_symbol(text)
 
-    if not symbol:
-        return  # Ignore non-crypto messages
+    if not detected:
+        return  # Ignore messages without $SYMBOL
 
-    crypto_data = get_crypto_data(symbol, "usd")
+    crypto_id, symbol = detected
+    crypto_data = get_crypto_data(crypto_id)
+
     if not crypto_data:
-        return  # Ignore if no data is found
+        message.reply_text(f"❌ Couldn't fetch data for `{symbol}`. Try again later.")
+        return
 
     # Extract data
     name = crypto_data["name"]
@@ -98,22 +102,18 @@ def crypto_handler(client, message):
     change_24h = crypto_data["price_change_percentage_24h"]
     ath = crypto_data["ath"]
     atl = crypto_data["atl"]
+
+    # Supply details
+    circulating_supply = crypto_data.get("circulating_supply", "N/A")
     total_supply = crypto_data.get("total_supply", "N/A")
     max_supply = crypto_data.get("max_supply", "N/A")
-    circulating_supply = crypto_data.get("circulating_supply", "N/A")
 
     # Generate the 24-hour price chart
-    graph_image = generate_graph(symbol)
+    graph_image = generate_graph(crypto_id)
 
-    # Inline Buttons (Currency Conversion)
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇮🇳 INR", callback_data=f"{symbol}_inr"),
-         InlineKeyboardButton("🇪🇺 EUR", callback_data=f"{symbol}_eur")]
-    ])
-
-    # Caption with all crypto details
+    # Caption with crypto details
     caption = (
-        f"📌 **{name} (${symbol.upper()})**\n"
+        f"📌 **{name} ({symbol})**\n"
         f"💰 **Price:** ${price:,.2f} USD\n"
         f"📈 **High 24H:** ${high:,.2f}\n"
         f"📉 **Low 24H:** ${low:,.2f}\n"
@@ -128,45 +128,16 @@ def crypto_handler(client, message):
     )
 
     if graph_image:
-        message.reply_photo(graph_image, caption=caption, reply_markup=buttons)
+        message.reply_photo(graph_image, caption=caption)
     else:
-        message.reply(caption, reply_markup=buttons)
-
-# Handle Currency Conversion Inline Buttons
-@app.on_callback_query()
-def currency_conversion(client, query):
-    data = query.data  # Example: "btc_inr" or "eth_eur"
-    
-    try:
-        symbol, currency = data.split("_")
-        crypto_data = get_crypto_data(symbol, currency)
-        
-        if not crypto_data:
-            query.answer("Error fetching data!", show_alert=True)
-            return
-
-        price = crypto_data["current_price"]
-
-        new_caption = f"📌 **{crypto_data['name']} ({symbol.upper()})**\n" \
-                      f"💰 **Price:** {price:,.2f} {currency.upper()}\n"
-
-        query.message.edit_caption(caption=new_caption, reply_markup=query.message.reply_markup)
-        query.answer()  # Acknowledge button press
-
-    except Exception as e:
-        query.answer(f"Error: {str(e)}", show_alert=True)
+        message.reply_text(caption)
 
 # Start Command
 @app.on_message(filters.command("start"))
 def start_command(client, message):
     message.reply_text(
         "**Welcome to Crypto Info Bot!** 🚀\n"
-        "Send a crypto name (e.g., `ETH`, `BTC`) or symbol (`$ETH`) to get price details.\n"
-        "Click the buttons to see prices in INR or EUR!",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📊 Check BTC", callback_data="btc_usd"),
-             InlineKeyboardButton("📊 Check ETH", callback_data="eth_usd")]
-        ])
+        "Send a crypto symbol with `$` (e.g., `$BTC`, `$TON`) to get price details."
     )
 
 # Run the bot
