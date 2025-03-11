@@ -7,7 +7,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # Telegram API Details (No need to manually add tokens)
 API_ID = 21017005
 API_HASH = "031173130fa724e7ecded16064724d96"
-BOT_TOKEN = "6762861077:AAHw71yggj7d619H-rdMSt-TyGWJcI_jlA4"
+BOT_TOKEN = "7882550530:AAHGbNRtsM5uGYDYwuxbrLyfWeOYpIRolGk"
 
 app = Client("crypto_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
