@@ -1,34 +1,18 @@
 import requests
-import matplotlib.pyplot as plt
-import datetime
-import os
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Load configuration
-def load_config():
-    with open("config.env", "r") as file:
-        lines = file.readlines()
-        config = {}
-        for line in lines:
-            key, value = line.strip().split("=")
-            config[key] = value
-        return config
+# Telegram Bot API Details
+API_ID = 21017005  # Replace with your API ID
+API_HASH = "031173130fa724e7ecded16064724d96"  # Replace with your API Hash
+BOT_TOKEN = "7882550530:AAHGbNRtsM5uGYDYwuxbrLyfWeOYpIRolGk"  # Replace with your Bot Token
 
-config = load_config()
+# Initialize Pyrogram Client
+app = Client("crypto_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-BOT_TOKEN = config["BOT_TOKEN"]
-API_ID = config["API_ID"]
-API_HASH = config["API_HASH"]
-
-# Initialize bot
-app = Client("CryptoBot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
-
-COINGECKO_API = "https://api.coingecko.com/api/v3"
-
-# Function to get crypto details
+# Function to fetch crypto data from CoinGecko
 def get_crypto_data(symbol, currency="usd"):
-    url = f"{COINGECKO_API}/coins/markets"
+    url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {
         "vs_currency": currency,
         "ids": symbol.lower(),
@@ -37,93 +21,90 @@ def get_crypto_data(symbol, currency="usd"):
         "page": 1,
         "sparkline": False
     }
-    response = requests.get(url).json()
-    if response:
-        return response[0]
-    return None
 
-# Function to get candlestick graph
-def get_candlestick(symbol):
-    url = f"{COINGECKO_API}/coins/{symbol.lower()}/market_chart"
-    params = {"vs_currency": "usd", "days": "7", "interval": "daily"}
-    response = requests.get(url).json()
-
-    if "prices" in response:
-        dates = [datetime.datetime.fromtimestamp(x[0] / 1000).strftime('%Y-%m-%d') for x in response["prices"]]
-        prices = [x[1] for x in response["prices"]]
-
-        plt.figure(figsize=(8, 4))
-        plt.plot(dates, prices, marker="o", linestyle="-", color="blue")
-        plt.xlabel("Date")
-        plt.ylabel("Price (USD)")
-        plt.title(f"{symbol.upper()} 7-Day Price Chart")
-        plt.xticks(rotation=45)
-        plt.grid()
-
-        graph_path = f"{symbol}_chart.png"
-        plt.savefig(graph_path)
-        plt.close()
-        return graph_path
-    return None
-
-# Handler to auto-detect crypto name/symbol
-@app.on_message(filters.text & filters.private)
-def send_crypto_info(client, message):
-    symbol = message.text.strip().lower()
-    crypto_data = get_crypto_data(symbol)
-
-    if crypto_data:
-        price = crypto_data["current_price"]
-        high = crypto_data["high_24h"]
-        low = crypto_data["low_24h"]
-        market_cap = crypto_data["market_cap"]
-        volume = crypto_data["total_volume"]
-        ath = crypto_data["ath"]
-        atl = crypto_data["atl"]
-
-        # Inline keyboard for currency conversion
-        buttons = [
-            [
-                InlineKeyboardButton("🇮🇳 INR", callback_data=f"convert_{symbol}_inr"),
-                InlineKeyboardButton("🇪🇺 EUR", callback_data=f"convert_{symbol}_eur"),
-            ]
-        ]
-
-        message_text = (
-            f"📌 **{crypto_data['name']} ($ {symbol.upper()})**\n"
-            f"💰 **Price:** ${price}\n"
-            f"📈 **High (24H):** ${high}\n"
-            f"📉 **Low (24H):** ${low}\n"
-            f"💎 **Market Cap:** ${market_cap}\n"
-            f"📊 **Volume (24H):** ${volume}\n"
-            f"🏆 **All-Time High:** ${ath}\n"
-            f"📅 **All-Time Low:** ${atl}"
-        )
-
-        chart_path = get_candlestick(symbol)
-        if chart_path:
-            message.reply_photo(photo=chart_path, caption=message_text, reply_markup=InlineKeyboardMarkup(buttons))
-            os.remove(chart_path)
-        else:
-            message.reply_text(message_text, reply_markup=InlineKeyboardMarkup(buttons))
-    else:
-        message.reply_text("❌ Invalid cryptocurrency symbol! Please try again.")
-
-# Handler for currency conversion
-@app.on_callback_query(filters.regex(r"convert_(.+)_(.+)"))
-def convert_currency(client, query):
-    symbol, currency = query.data.split("_")[1:]
-    crypto_data = get_crypto_data(symbol, currency)
+    response = requests.get(url, params=params).json()
     
-    if crypto_data:
-        price = crypto_data["current_price"]
-        currency_symbol = "₹" if currency == "inr" else "€"
+    if not response or isinstance(response, dict) and "error" in response:
+        return None
+    
+    return response[0]
 
-        query.message.edit_text(
-            f"📌 **{crypto_data['name']} ($ {symbol.upper()})**\n"
-            f"💰 **Price:** {currency_symbol}{price}\n"
-            f"(Updated in {currency.upper()})"
-        )
+# Start Command
+@app.on_message(filters.command("start"))
+async def start(client, message):
+    start_msg = """👋 **Welcome to Crypto Info Bot! 🚀**
 
-# Start bot
+🔹 Get **real-time crypto stats**  
+🔹 Just type any **crypto name** (e.g., `bitcoin`, `dogecoin`)  
+🔹 View **charts, high/low, market cap, supply & more**  
+🔹 **Click buttons** to switch currency (USD, INR, EUR)  
+
+📊 **Send a coin name now to get started!**"""
+    
+    await message.reply(start_msg)
+
+# Crypto Price Handler (No Command Needed)
+@app.on_message(filters.text & ~filters.command)
+async def crypto_info(client, message):
+    symbol = message.text.strip().lower()
+    data = get_crypto_data(symbol)
+
+    if not data:
+        await message.reply("❌ Crypto not found. Please enter a valid name (e.g., `bitcoin`, `ethereum`).")
+        return
+
+    price = data["current_price"]
+    high = data["high_24h"]
+    low = data["low_24h"]
+    market_cap = data["market_cap"]
+    volume = data["total_volume"]
+    
+    response_text = f"""
+📊 **{data['name']} ({data['symbol'].upper()}) Stats**
+💰 **Price:** ${price}
+📈 **24H High:** ${high}
+📉 **24H Low:** ${low}
+🏦 **Market Cap:** ${market_cap}
+📊 **24H Volume:** ${volume}
+🌎 **Total Supply:** {data['total_supply'] if data['total_supply'] else "N/A"}
+"""
+
+    # Currency conversion buttons
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🇺🇸 USD", callback_data=f"convert_{symbol}_usd"),
+         InlineKeyboardButton("🇮🇳 INR", callback_data=f"convert_{symbol}_inr"),
+         InlineKeyboardButton("🇪🇺 EUR", callback_data=f"convert_{symbol}_eur")]
+    ])
+    
+    await message.reply(response_text, reply_markup=keyboard)
+
+# Handle Currency Conversion Button Clicks
+@app.on_callback_query()
+async def convert_currency(client, callback_query):
+    _, symbol, currency = callback_query.data.split("_")
+    data = get_crypto_data(symbol, currency)
+
+    if not data:
+        await callback_query.answer("❌ Failed to fetch updated price.", show_alert=True)
+        return
+    
+    price = data["current_price"]
+    high = data["high_24h"]
+    low = data["low_24h"]
+    market_cap = data["market_cap"]
+    volume = data["total_volume"]
+
+    response_text = f"""
+📊 **{data['name']} ({data['symbol'].upper()}) Stats**
+💰 **Price:** {price} {currency.upper()}
+📈 **24H High:** {high} {currency.upper()}
+📉 **24H Low:** {low} {currency.upper()}
+🏦 **Market Cap:** {market_cap} {currency.upper()}
+📊 **24H Volume:** {volume} {currency.upper()}
+🌎 **Total Supply:** {data['total_supply'] if data['total_supply'] else "N/A"}
+"""
+    
+    await callback_query.message.edit(response_text)
+
+# Run the bot
 app.run()
