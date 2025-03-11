@@ -107,8 +107,7 @@ def crypto_handler(client, message):
 
     # Inline Buttons (Currency Conversion)
     buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🇺🇸 USD", callback_data=f"{symbol}_usd"),
-         InlineKeyboardButton("🇮🇳 INR", callback_data=f"{symbol}_inr"),
+        [InlineKeyboardButton("🇮🇳 INR", callback_data=f"{symbol}_inr"),
          InlineKeyboardButton("🇪🇺 EUR", callback_data=f"{symbol}_eur")]
     ])
 
@@ -132,6 +131,43 @@ def crypto_handler(client, message):
         message.reply_photo(graph_image, caption=caption, reply_markup=buttons)
     else:
         message.reply(caption, reply_markup=buttons)
+
+# Handle Currency Conversion Inline Buttons
+@app.on_callback_query()
+def currency_conversion(client, query):
+    data = query.data  # Example: "btc_inr" or "eth_eur"
+    
+    try:
+        symbol, currency = data.split("_")
+        crypto_data = get_crypto_data(symbol, currency)
+        
+        if not crypto_data:
+            query.answer("Error fetching data!", show_alert=True)
+            return
+
+        price = crypto_data["current_price"]
+
+        new_caption = f"📌 **{crypto_data['name']} ({symbol.upper()})**\n" \
+                      f"💰 **Price:** {price:,.2f} {currency.upper()}\n"
+
+        query.message.edit_caption(caption=new_caption, reply_markup=query.message.reply_markup)
+        query.answer()  # Acknowledge button press
+
+    except Exception as e:
+        query.answer(f"Error: {str(e)}", show_alert=True)
+
+# Start Command
+@app.on_message(filters.command("start"))
+def start_command(client, message):
+    message.reply_text(
+        "**Welcome to Crypto Info Bot!** 🚀\n"
+        "Send a crypto name (e.g., `ETH`, `BTC`) or symbol (`$ETH`) to get price details.\n"
+        "Click the buttons to see prices in INR or EUR!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 Check BTC", callback_data="btc_usd"),
+             InlineKeyboardButton("📊 Check ETH", callback_data="eth_usd")]
+        ])
+    )
 
 # Run the bot
 app.run()
